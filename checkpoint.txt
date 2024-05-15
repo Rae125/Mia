@@ -1,0 +1,335 @@
+oke ik wil even een soort checkpoint maken hier en wat we nu hebben hier is dat het download een lijst heeft en kan beide mp3 en mp4 downloaden hij doet dit statisch in de map downlaoden en dit zijn de codes waarvan we verder zullen werken
+
+
+
+index.html
+'<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube Downloader</h1>
+        <input type="text" id="url" placeholder="Enter YouTube URL or Playlist URL">
+        <select id="format">
+            <option value="mp3">MP3</option>
+            <option value="mp4">MP4</option>
+        </select>
+        <button id="downloadBtn">Download</button>
+        <div id="loader" class="hidden"></div>
+        <div id="results"></div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
+'
+
+script.js
+'document.getElementById('downloadBtn').addEventListener('click', async () => {
+    const url = document.getElementById('url').value;
+    const format = document.getElementById('format').value;
+    const loader = document.getElementById('loader');
+    const results = document.getElementById('results');
+
+    loader.classList.remove('hidden');
+
+    const response = await fetch(`/convert?url=${encodeURIComponent(url)}&format=${format}`);
+    loader.classList.add('hidden');
+
+    if (response.ok) {
+        const data = await response.json();
+
+        const resultItem = document.createElement('div');
+        resultItem.classList.add('result-item');
+
+        const thumbnail = document.createElement('img');
+        thumbnail.src = data.thumbnail;
+        resultItem.appendChild(thumbnail);
+
+        const info = document.createElement('div');
+        info.classList.add('info');
+
+        const title = document.createElement('h3');
+        title.textContent = data.file.split('/').pop().replace(/_/g, ' ').replace(/\..*$/, '');
+        info.appendChild(title);
+
+        const downloadLink = document.createElement('a');
+        downloadLink.href = data.file;
+        downloadLink.download = data.file.split('/').pop();
+        downloadLink.textContent = 'Download File';
+        info.appendChild(downloadLink);
+
+        resultItem.appendChild(info);
+        results.appendChild(resultItem);
+    } else {
+        alert('Error downloading file');
+    }
+});
+'
+
+
+
+style.css
+'body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f4;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+.container {
+    background-color: #fff;
+    padding: 20px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    border-radius: 5px;
+    text-align: center;
+    max-width: 500px;
+    width: 100%;
+}
+
+h1 {
+    margin-bottom: 20px;
+}
+
+input, select, button {
+    margin: 10px 0;
+    padding: 10px;
+    width: calc(100% - 22px);
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 16px;
+}
+
+button {
+    background-color: #28a745;
+    color: white;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #218838;
+}
+
+#thumbnail {
+    max-width: 100%;
+    height: auto;
+    margin-top: 20px;
+}
+
+.hidden {
+    display: none;
+}
+
+#loader {
+    border: 16px solid #f3f3f3;
+    border-radius: 50%;
+    border-top: 16px solid #3498db;
+    width: 120px;
+    height: 120px;
+    animation: spin 2s linear infinite;
+    margin: 20px auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+#results {
+    margin-top: 20px;
+}
+
+.result-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    background-color: #f9f9f9;
+}
+
+.result-item img {
+    max-width: 100px;
+    height: auto;
+    margin-right: 20px;
+}
+
+.result-item .info {
+    flex: 1;
+}
+
+.result-item .info h3 {
+    margin: 0 0 10px;
+    font-size: 18px;
+}
+
+.result-item .info a {
+    display: block;
+    margin-top: 10px;
+    padding: 10px 20px;
+    background-color: #007bff;
+    color: white;
+    text-decoration: none;
+    border-radius: 5px;
+    text-align: center;
+}
+
+.result-item .info a:hover {
+    background-color: #0056b3;
+}
+'
+
+
+
+index.js:
+
+'const express = require('express');
+const ytdl = require('ytdl-core');
+const ytpl = require('ytpl');
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
+const fs = require('fs');
+const path = require('path');
+const archiver = require('archiver');
+const app = express();
+const port = 3000;
+
+// Stel expliciet het pad naar de FFmpeg-binary in
+ffmpeg.setFfmpegPath(ffmpegPath);
+
+app.use(express.static('public'));
+
+app.get('/convert', async (req, res) => {
+    const { url, format } = req.query;
+    if (!ytdl.validateURL(url) && !ytpl.validateID(url)) {
+        return res.status(400).json({ success: false, error: 'Invalid YouTube URL or Playlist ID' });
+    }
+
+    const isPlaylist = ytpl.validateID(url);
+    if (isPlaylist) {
+        const playlist = await ytpl(url);
+        const title = playlist.title.replace(/[^a-zA-Z0-9]/g, '_');
+        const zipPath = path.resolve(__dirname, 'downloads', `${title}.zip`);
+        const output = fs.createWriteStream(zipPath);
+        const archive = archiver('zip', {
+            zlib: { level: 9 }
+        });
+
+        output.on('close', () => {
+            res.json({ file: `/downloads/${title}.zip`, thumbnail: playlist.bestThumbnail.url });
+        });
+
+        archive.on('error', (err) => {
+            console.error('An error occurred: ' + err.message);
+            res.status(500).json({ success: false, error: err.message });
+        });
+
+        archive.pipe(output);
+
+        for (const video of playlist.items) {
+            const videoUrl = video.url;
+            const videoInfo = await ytdl.getInfo(videoUrl);
+            const videoTitle = videoInfo.videoDetails.title.replace(/[^a-zA-Z0-9]/g, '_');
+            const videoFilePath = path.resolve(__dirname, 'downloads', `${videoTitle}.${format}`);
+
+            await new Promise((resolve, reject) => {
+                if (format === 'mp3') {
+                    const stream = ytdl(videoUrl, { filter: 'audioonly' });
+                    ffmpeg(stream)
+                        .audioBitrate(128)
+                        .toFormat('mp3')
+                        .save(videoFilePath)
+                        .on('end', () => {
+                            archive.file(videoFilePath, { name: `${videoTitle}.mp3` });
+                            fs.unlink(videoFilePath, (err) => {
+                                if (err) {
+                                    console.error('Error deleting file:', err);
+                                }
+                                resolve();
+                            });
+                        })
+                        .on('error', (err) => {
+                            console.error('An error occurred: ' + err.message);
+                            reject(err);
+                        });
+                } else if (format === 'mp4') {
+                    const stream = ytdl(videoUrl, { quality: 'highest' });
+                    ffmpeg(stream)
+                        .videoCodec('libx264')
+                        .toFormat('mp4')
+                        .save(videoFilePath)
+                        .on('end', () => {
+                            archive.file(videoFilePath, { name: `${videoTitle}.mp4` });
+                            fs.unlink(videoFilePath, (err) => {
+                                if (err) {
+                                    console.error('Error deleting file:', err);
+                                }
+                                resolve();
+                            });
+                        })
+                        .on('error', (err) => {
+                            console.error('An error occurred: ' + err.message);
+                            reject(err);
+                        });
+                } else {
+                    reject(new Error('Unsupported format'));
+                }
+            });
+        }
+
+        archive.finalize();
+    } else {
+        const info = await ytdl.getInfo(url);
+        const title = info.videoDetails.title.replace(/[^a-zA-Z0-9]/g, '_');
+        const thumbnail = info.videoDetails.thumbnails[0].url;
+        const filePath = path.resolve(__dirname, 'downloads', `${title}.${format}`);
+
+        if (format === 'mp3') {
+            const stream = ytdl(url, { filter: 'audioonly' });
+            ffmpeg(stream)
+                .audioBitrate(128)
+                .toFormat('mp3')
+                .save(filePath)
+                .on('end', () => {
+                    res.json({ file: `/downloads/${title}.${format}`, thumbnail });
+                })
+                .on('error', (err) => {
+                    console.error('An error occurred: ' + err.message);
+                    res.status(500).json({ success: false, error: err.message });
+                });
+        } else if (format === 'mp4') {
+            const stream = ytdl(url, { quality: 'highest' });
+            ffmpeg(stream)
+                .videoCodec('libx264')
+                .toFormat('mp4')
+                .save(filePath)
+                .on('end', () => {
+                    res.json({ file: `/downloads/${title}.${format}`, thumbnail });
+                })
+                .on('error', (err) => {
+                    console.error('An error occurred: ' + err.message);
+                    res.status(500).json({ success: false, error: err.message });
+                });
+        } else {
+            res.status(400).json({ success: false, error: 'Unsupported format' });
+        }
+    }
+});
+
+// Zorg dat de 'downloads' map statische bestanden kan serveren
+app.use('/downloads', express.static(path.join(__dirname, 'downloads')));
+
+app.listen(port, () => {
+    console.log(`Server is running at http://localhost:${port}`);
+});
+'
+
+en natuurlkijk de packagje .jsaons en de download map
